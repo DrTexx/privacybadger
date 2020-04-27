@@ -17,10 +17,6 @@ function cleanLink(a) {
     }
   }
   a.rel = "noreferrer noopener";
-
-  // block event listeners on the link
-  a.addEventListener("click", function (e) { e.stopImmediatePropagation(); }, true);
-  a.addEventListener("mousedown", function (e) { e.stopImmediatePropagation(); }, true);
 }
 
 // TODO race condition; fix waiting on https://crbug.com/478183
