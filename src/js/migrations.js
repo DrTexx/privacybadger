@@ -22,7 +22,8 @@ require.scopes.migrations = (function() {
 
 var exports = {};
 exports.Migrations= {
-  changePrivacySettings: function() {
+
+  changePrivacySettings: function () {
     if (!chrome.extension.inIncognitoContext && chrome.privacy) {
       console.log('changing privacy settings');
       if (chrome.privacy.services && chrome.privacy.services.alternateErrorPagesEnabled) {
@@ -36,6 +37,7 @@ exports.Migrations= {
 
   migrateAbpToStorage: function () {},
 
+  // TODO blank out this migration?
   migrateBlockedSubdomainsToCookieblock: function(badger) {
     setTimeout(function() {
       console.log('MIGRATING BLOCKED SUBDOMAINS THAT ARE ON COOKIE BLOCK LIST');
@@ -229,22 +231,26 @@ exports.Migrations= {
   },
 
   resetWebRTCIPHandlingPolicy: function (badger) {
-    console.log("Resetting webRTCIPHandlingPolicy ...");
-
     if (!badger.webRTCAvailable) {
       return;
     }
 
-    const cpn = chrome.privacy.network;
+    return new Promise(function (resolve) {
+      console.log("Resetting webRTCIPHandlingPolicy ...");
 
-    cpn.webRTCIPHandlingPolicy.get({}, function (result) {
-      if (!result.levelOfControl.endsWith('_by_this_extension')) {
-        return;
-      }
+      const cpn = chrome.privacy.network;
 
-      if (result.value == 'default_public_interface_only') {
-        cpn.webRTCIPHandlingPolicy.clear({});
-      }
+      cpn.webRTCIPHandlingPolicy.get({}, function (result) {
+        if (!result.levelOfControl.endsWith('_by_this_extension')) {
+          return resolve();
+        }
+
+        if (result.value == 'default_public_interface_only') {
+          cpn.webRTCIPHandlingPolicy.clear({});
+        }
+
+        resolve();
+      });
     });
   },
 
@@ -293,49 +299,54 @@ exports.Migrations= {
   },
 
   forgetCloudflare: function (badger) {
-    let config = {
-      name: '__cfduid'
-    };
-    if (badger.firstPartyDomainPotentiallyRequired) {
-      config.firstPartyDomain = null;
-    }
-
-    chrome.cookies.getAll(config, function (cookies) {
-      console.log("Forgetting Cloudflare domains ...");
-
-      let actionMap = badger.storage.getBadgerStorageObject("action_map"),
-        actionClones = actionMap.getItemClones(),
-        snitchMap = badger.storage.getBadgerStorageObject("snitch_map"),
-        snitchClones = snitchMap.getItemClones(),
-        correctedSites = {},
-        // assume the tracking domains seen on these sites are all Cloudflare
-        cfduidFirstParties = new Set();
-
-      cookies.forEach(function (cookie) {
-        // get the base domain (also removes the leading dot)
-        cfduidFirstParties.add(window.getBaseDomain(cookie.domain));
-      });
-
-      for (let domain in snitchClones) {
-        let newSnitches = snitchClones[domain].filter(
-          item => !cfduidFirstParties.has(item));
-
-        if (newSnitches.length) {
-          correctedSites[domain] = newSnitches;
-        }
+    return new Promise(function (resolve) {
+      let config = {
+        name: '__cfduid'
+      };
+      if (badger.firstPartyDomainPotentiallyRequired) {
+        config.firstPartyDomain = null;
       }
 
-      // clear existing maps and then use mergeUserData to rebuild them
-      actionMap.updateObject({});
-      snitchMap.updateObject({});
+      chrome.cookies.getAll(config, function (cookies) {
+        console.log("Forgetting Cloudflare domains ...");
 
-      const data = {
-        snitch_map: correctedSites,
-        action_map: actionClones
-      };
+        let actionMap = badger.storage.getBadgerStorageObject("action_map"),
+          actionClones = actionMap.getItemClones(),
+          snitchMap = badger.storage.getBadgerStorageObject("snitch_map"),
+          snitchClones = snitchMap.getItemClones(),
+          correctedSites = {},
+          // assume the tracking domains seen on these sites are all Cloudflare
+          cfduidFirstParties = new Set();
 
-      // pass in boolean 2nd parameter to flag that it's run in a migration, preventing infinite loop
-      badger.mergeUserData(data, true);
+        cookies.forEach(function (cookie) {
+          // get the base domain (also removes the leading dot)
+          cfduidFirstParties.add(window.getBaseDomain(cookie.domain));
+        });
+
+        for (let domain in snitchClones) {
+          let newSnitches = snitchClones[domain].filter(
+            item => !cfduidFirstParties.has(item));
+
+          if (newSnitches.length) {
+            correctedSites[domain] = newSnitches;
+          }
+        }
+
+        // clear existing maps and then use mergeUserData to rebuild them
+        actionMap.updateObject({});
+        snitchMap.updateObject({});
+
+        const data = {
+          snitch_map: correctedSites,
+          action_map: actionClones
+        };
+
+        // pass in boolean 2nd parameter to flag that it's run in a migration,
+        // preventing infinite loop
+        badger.mergeUserData(data, true);
+
+        resolve();
+      });
     });
   },
 
